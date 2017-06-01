@@ -11,11 +11,9 @@ object Main {
 
             val downloadManager = actorSystem.actorOf(
                 DownloadManager.props(links,
-                    "/Users/dns/Documents/temp/output", 64000, 3), "DownloadManager")
-            System.out.println("Shutting down actor system")
-            //        actorSystem.shutdown();    
+                    "/Users/dns/Documents/temp/output", 64000, 2), "DownloadManager")
         } catch {
-            case ex: Throwable => System.out.println("Exception: " + ex.getLocalizedMessage)
+            case ex: Throwable => ex.printStackTrace()
         }
         
     }

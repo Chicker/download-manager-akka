@@ -1,90 +1,87 @@
 package ru.chicker.downloader.actors
 
-import java.util
-
 import ru.chicker.downloader.actors.DownloadManager.MsgNewTask
 import akka.actor.{Actor, ActorLogging, PoisonPill, Props, Terminated}
-import ru.chicker.downloader.models.DownloadResult
+import ru.chicker.downloader.actors.DownloaderActor.MsgGetTask
+import ru.chicker.downloader.models.{DownloadResult, DownloadSuccess}
 import ru.chicker.downloader.entities.{DownloadLinkInfo, DownloadTask}
 
-import scala.collection.mutable
+import scala.collection.immutable.ListSet
+import scala.collection.mutable.{ArrayBuffer, LinkedHashSet}
 
-class DownloadManager(val links: util.Collection[DownloadLinkInfo],
+class DownloadManager(val links: ListSet[DownloadLinkInfo],
                       val pathToOutputPathFolder: String,
                       val totalSpeedLimit: Long,
-                      val numThreads: Int)
+                      val workersCount: Int)
     extends Actor with ActorLogging {
-
-    import context.become
     
     private val ONE_KILOBYTE: Int = 1024
     private val ONE_MEGABYTE: Int = ONE_KILOBYTE * ONE_KILOBYTE
-    //  private val downloaders: util.List[ActorRef] = new util.ArrayList[ActorRef]
-    //  private val resultList: util.Collection[Either[DownloadError, DownloadSuccess]] = new util.ArrayList[Either[DownloadError, DownloadSuccess]]
-    private var taskListIsEmpty = false
-    private val resultList = new mutable.ArrayBuffer[DownloadResult]()
+    private val resultList = new ArrayBuffer[DownloadResult]()
+    private val taskList = LinkedHashSet.empty ++= links
+    private var numberOfTerminatedChilds = 0
+    
+    override def receive: Receive = {
+        case DownloaderActor.MsgGetTask =>
+            prepareAndSendNewTask()
 
-    private val taskList = new util.LinkedList[DownloadLinkInfo](links)
-    
-    
-    
-    def finishing: Receive = {
-        case DownloaderActor.MsgGetTask => sender().tell(PoisonPill, self)
-        case DownloaderActor.MsgTaskFinished(downloadResult) => {
+        case DownloaderActor.MsgTaskFinished(downloadResult) =>
             processWorkResult(downloadResult)
-        }
-        case Terminated(child) => {
-            printf(s"This child ${child} has been terminated\n")
-        }
+            prepareAndSendNewTask()
+
+        case Terminated(child) =>
+            log.debug(s"The worker $child has been terminated\n")
+
+            numberOfTerminatedChilds = numberOfTerminatedChilds + 1
+
+            if (numberOfTerminatedChilds == workersCount) context stop self
     }
 
-    override def receive: Receive = {
-        case DownloaderActor.MsgGetTask => {
-            val link = taskList.poll() 
-            
-            if (null == link ) {
-                sender().tell(PoisonPill, self)
-                become(finishing)
-                // TODO установить самому себе timeout на ожидание завершения своих 
-                // дочерних акторов
-            } else {
-                val task = new DownloadTask(link, pathToOutputPathFolder)
-                sender().tell(MsgNewTask(task), self)
-            }
-        }
+    private def prepareAndSendNewTask() = {
+        val link = taskList.headOption
 
-        case DownloaderActor.MsgTaskFinished(downloadResult) => {
-            processWorkResult(downloadResult)
+        if (link.isDefined) {
+            val task = new DownloadTask(link.get, pathToOutputPathFolder)
+            sender ! MsgNewTask(task)
+
+            taskList -= link.get
+        } else {
+            // no tasks anymore, stop workers
+            context stop sender
         }
     }
 
     private def processWorkResult(downloadResult: DownloadResult) = {
-        resultList.+=(downloadResult)
+        resultList += downloadResult
     }
 
     private def printFooter(): Unit = {
-        //    downloadResult match {
-        //      case DownloadSuccess(linkInfo, bytesCount) => {
-        //
-        //      }
-        //      case DownloadError(linkInfo, error) => {
-        //
-        //      }
-        //    }
+        println("----------------------")
+        println("Program statistic:")
+
+        val sizeOfAllDownloads =
+            resultList
+            .collect {case DownloadSuccess(_, bytesCount) => bytesCount }
+            .sum
+        
+        resultList.foreach(println)
+        
+        println(f"[${resultList.size}%d] links are processed. Total size of the downloaded files " +
+            f"is [${formatBytes(sizeOfAllDownloads)}%s]") 
+            
+        println("----------------------")
     }
 
     private def init() {
-        val speedLimitToThread = totalSpeedLimit / numThreads
-        
-        
+        val speedLimitToThread = totalSpeedLimit / workersCount
         
         startWorkers(speedLimitToThread)
 
-        log.debug(s"${numThreads} downloaders are been created")
+        log.info(s"$workersCount downloaders are been created")
     }
 
     private def startWorkers(speedLimitToThread: Long) = {
-        (1 to numThreads).foreach { i =>
+        (1 to workersCount).foreach { i =>
             val child = context.actorOf(DownloaderActor.props(speedLimitToThread),
                 s"Downloader_${i}_")
 
@@ -92,11 +89,24 @@ class DownloadManager(val links: util.Collection[DownloadLinkInfo],
         }
     }
 
-    @scala.throws[Exception](classOf[Exception])
+    private def formatBytes(bytes: Long) = {
+        if (bytes < ONE_MEGABYTE)
+            f"${bytes.toFloat / ONE_KILOBYTE}%.2f Kb"
+        else
+            f"${bytes.toFloat / ONE_MEGABYTE}%.2f Mb"
+    }
+    
     override def preStart(): Unit = {
         super.preStart()
-        log.debug("DownloadManager preStart")
         init()
+    }
+
+    override def postStop(): Unit = {
+        super.postStop()
+        log.info("Shutting down actorsystem")
+        context.system.shutdown()
+
+        printFooter()
     }
 }
 
@@ -104,7 +114,7 @@ object DownloadManager {
 
     case class MsgNewTask(downloadTask: DownloadTask)
 
-    def props(links: util.Collection[DownloadLinkInfo], pathToOutputPathFolder: String,
+    def props(links: ListSet[DownloadLinkInfo], pathToOutputPathFolder: String,
               totalSpeedLimit: Long, numThreads: Int): Props = {
         Props(classOf[DownloadManager], links,
             pathToOutputPathFolder, totalSpeedLimit, numThreads)

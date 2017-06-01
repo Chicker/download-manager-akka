@@ -1,7 +1,7 @@
 package ru.chicker.downloader.actors
 
 import java.io.{ByteArrayOutputStream, FileOutputStream, IOException, InputStream}
-import java.nio.file.FileSystems
+import java.nio.file.{FileSystems, Path}
 
 import akka.actor.{Actor, ActorLogging, Props}
 import org.apache.http.client.methods.HttpGet
@@ -9,79 +9,78 @@ import org.apache.http.impl.client.HttpClients
 import ru.chicker.downloader.actors.DownloaderActor.{MsgGetTask, MsgTaskFinished}
 import ru.chicker.downloader.entities.DownloadTask
 import ru.chicker.downloader.models.{DownloadError, DownloadResult, DownloadSuccess}
+import ru.chicker.downloader.util.{use}
 
 class DownloaderActor(val speedLimit: Long) extends Actor with ActorLogging {
     private val BUFFER_SIZE: Int = 64 * 1024
     private val ONE_SECOND: Int = 1000
 
     override def receive: Receive = {
-        case DownloadManager.MsgNewTask(downloadTask) => {
+        case DownloadManager.MsgNewTask(downloadTask) =>
             val processResult = processTask(downloadTask)
 
-            sender() ! MsgTaskFinished(processResult)
-        }
+            sender ! MsgTaskFinished(processResult)
+        case msg =>
+            log.error(s"Undefined message ${msg.toString} has been received")
     }
 
     private def processTask(task: DownloadTask): DownloadResult = {
-        log.info("New task has been received! {}", task.toString)
-        downloadLink(task) match {
-            case Right(bytesCount) => DownloadSuccess(task.getLinkInfo,
-                bytesCount)
-            case Left(thr) => DownloadError(task.getLinkInfo, thr)
+        log.debug("New task has been received! {}", task.toString)
+        
+        try {
+            DownloadSuccess(task.getLinkInfo, downloadLink(task))
+        } catch {
+            case ex: Throwable => DownloadError(task.getLinkInfo, ex)
         }
     }
 
-    private def downloadLink(downloadTask: DownloadTask): Either[Throwable, Long] = {
+    private def httpGet[B](url: String)(op: InputStream => B): B = {
         val httpclient = HttpClients.createDefault()
-        val httpget = new HttpGet(downloadTask.getLinkInfo.getHttpLink)
-        var bytesRead = 0
-        log.info("Starting downloading file: {}", downloadTask.getLinkInfo.getFileName)
+        val httpget = new HttpGet(url)
 
-        bytesRead = 0
-        try {
-            val response = httpclient.execute(httpget)
-            try {
-                val statusCode = response.getStatusLine.getStatusCode
-                if (statusCode == 200) {
-                    val entity = response.getEntity
-                    if (entity != null) {
-                        val instream = entity.getContent
-                        try {
-                            val byteStream = readWithLimit(this.speedLimit.toInt, instream)
-                            val outputFilePath = FileSystems.getDefault.getPath(
-                                downloadTask.getOutputFolder,
-                                downloadTask.getLinkInfo.getFileName)
-
-                            log.debug("Downloader is trying to write file to the folder: {}",
-                                outputFilePath)
-                            val fo = new FileOutputStream(outputFilePath.toFile)
-                            try {
-                                fo.write(byteStream.toByteArray)
-                                bytesRead = byteStream.size()
-                            } finally {
-                                if (fo != null) fo.close()
-                            }
-
-                        } finally {
-                            if (instream != null) instream.close()
-                        }
-                    } else {
-                        log.error("downloadLink error, httpEntity is null")
-                        return Left(new IOException("httpEntity is null"))
-                    }
+        val response = httpclient.execute(httpget)
+        
+        use(response) { response => 
+            val statusCode = response.getStatusLine.getStatusCode
+            if (statusCode == 200) {
+                val entity = response.getEntity
+                if (entity != null) {
+                    op(entity.getContent)
+                } else {
+                    throw new IOException("No http content exists!")
                 }
-            } finally {
-                if (response != null) response.close()
+            } else {
+                throw new IOException(s"The server response code <> 200, is equal $statusCode")
             }
-        } catch {
-            case ex: Throwable =>
-                log.error(ex, "downloadLink error")
-                return Left(ex)
         }
+    }
 
-        log.info("Download {} finished", downloadTask.getLinkInfo.getFileName)
+    private def saveToFile(outputFile: Path, byteStream: ByteArrayOutputStream) = {
+        log.debug("Downloader is trying to write file to the folder: {}", outputFile)
+        
+        val fo = new FileOutputStream(outputFile.toFile)
 
-        Right(bytesRead)
+        use(fo) { _.write(byteStream.toByteArray) }
+    }
+
+    private def downloadLink(downloadTask: DownloadTask): Int = {
+
+        def read(in: InputStream) = readWithLimit(this.speedLimit.toInt, in)
+        
+        log.info("Starting downloading file: {}", downloadTask.getLinkInfo.getFileName)
+        val byteStream = httpGet(downloadTask.getLinkInfo.getHttpLink)(read)
+        val bytesRead = byteStream.size()
+
+        val outputFilePath = FileSystems.getDefault.getPath(
+            downloadTask.getOutputFolder,
+            downloadTask.getLinkInfo.getFileName)
+
+        saveToFile(outputFilePath, byteStream)
+
+        log.info("{} is successfully downloaded and saved to file",
+            downloadTask.getLinkInfo.getFileName)
+
+        bytesRead
     }
 
     def readWithLimit(speedLimit: Int,
@@ -136,18 +135,11 @@ class DownloaderActor(val speedLimit: Long) extends Actor with ActorLogging {
     }
 
 
-    @scala.throws[Exception](classOf[Exception])
     override def preStart(): Unit = {
         super.preStart()
         log.debug("starting...")
 
         context.parent ! MsgGetTask
-    }
-
-    @scala.throws[Exception](classOf[Exception])
-    override def postStop(): Unit = {
-        super.postStop()
-        log.debug("stopping")
     }
 }
 

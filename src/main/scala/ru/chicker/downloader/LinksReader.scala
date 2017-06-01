@@ -7,23 +7,31 @@ import ru.chicker.downloader.entities.DownloadLinkInfo
 import ru.chicker.downloader.exceptions.InvalidFileStructureException
 import ru.chicker.downloader.util.use
 
+import scala.collection.immutable.ListSet
+
 object LinksReader {
-    def load(linksFileName: String): java.util.Set[DownloadLinkInfo] = {
-        val result = new java.util.HashSet[DownloadLinkInfo]
+    def load(linksFileName: String): ListSet[DownloadLinkInfo] = {
+
         use(new Scanner(new FileInputStream(linksFileName))) { scanner =>
-            while (scanner.hasNextLine) {
-                try {
-                    val httpLink = scanner.next
-                    val fileNameToSave = scanner.next
-                    result.add(new DownloadLinkInfo(fileNameToSave, httpLink))
-                }
-                catch {
-                    case ex: NoSuchElementException => {
-                        throw new InvalidFileStructureException(linksFileName, ex)
-                    }
+            try {
+                parseLinkInfo(scanner, ListSet.empty)
+            }
+            catch {
+                case ex: NoSuchElementException => {
+                    throw new InvalidFileStructureException(linksFileName, ex)
                 }
             }
         }
-        result
+    }
+
+    def parseLinkInfo(scanner: Scanner, links: ListSet[DownloadLinkInfo]): ListSet[DownloadLinkInfo] = {
+        if (scanner.hasNextLine) {
+            val httpLink = scanner.next
+            val fileNameToSave = scanner.next
+
+            parseLinkInfo(scanner, links + new DownloadLinkInfo(fileNameToSave, httpLink))
+        } else {
+            links
+        }
     }
 }
