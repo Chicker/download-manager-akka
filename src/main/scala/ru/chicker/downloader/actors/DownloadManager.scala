@@ -3,8 +3,8 @@ package ru.chicker.downloader.actors
 import ru.chicker.downloader.actors.DownloadManager.MsgNewTask
 import akka.actor.{Actor, ActorLogging, PoisonPill, Props, Terminated}
 import ru.chicker.downloader.actors.DownloaderActor.MsgGetTask
-import ru.chicker.downloader.models.{DownloadResult, DownloadSuccess}
-import ru.chicker.downloader.entities.{DownloadLinkInfo, DownloadTask}
+import ru.chicker.downloader.models.{DownloadLinkInfo, DownloadResult, DownloadSuccess, DownloadTask}
+
 
 import scala.collection.immutable.ListSet
 import scala.collection.mutable.{ArrayBuffer, LinkedHashSet}

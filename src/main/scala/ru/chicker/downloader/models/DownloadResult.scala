@@ -1,7 +1,5 @@
 package ru.chicker.downloader.models
 
-import ru.chicker.downloader.entities.DownloadLinkInfo
-
 sealed trait DownloadResult
 
 case class DownloadSuccess(linkInfo: DownloadLinkInfo,

@@ -7,9 +7,8 @@ import akka.actor.{Actor, ActorLogging, Props}
 import org.apache.http.client.methods.HttpGet
 import org.apache.http.impl.client.HttpClients
 import ru.chicker.downloader.actors.DownloaderActor.{MsgGetTask, MsgTaskFinished}
-import ru.chicker.downloader.entities.DownloadTask
-import ru.chicker.downloader.models.{DownloadError, DownloadResult, DownloadSuccess}
-import ru.chicker.downloader.util.{use}
+import ru.chicker.downloader.models.{DownloadError, DownloadResult, DownloadSuccess, DownloadTask}
+import ru.chicker.downloader.util.use
 
 class DownloaderActor(val speedLimit: Long) extends Actor with ActorLogging {
     private val BUFFER_SIZE: Int = 64 * 1024

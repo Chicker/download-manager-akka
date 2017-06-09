@@ -3,8 +3,8 @@ package ru.chicker.downloader
 import java.io.FileInputStream
 import java.util.Scanner
 
-import ru.chicker.downloader.entities.DownloadLinkInfo
 import ru.chicker.downloader.exceptions.InvalidFileStructureException
+import ru.chicker.downloader.models.DownloadLinkInfo
 import ru.chicker.downloader.util.use
 
 import scala.collection.immutable.ListSet
