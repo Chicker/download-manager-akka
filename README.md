@@ -52,7 +52,7 @@ For the sending Http requests is using `httpclient` library which is a part of `
 
 ### Command line interface
 
-For the building command line interface for our program is using `scopt` library, which is also well known.
+For the building command line interface is using `scopt` library, which is also well known.
 
 ## Configuration
 
