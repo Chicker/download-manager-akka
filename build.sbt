@@ -14,6 +14,10 @@ mainClass in assembly := Some("ru.chicker.downloader.Main")
 test in assembly := {}
 
 assemblyMergeStrategy in assembly := {
-  case PathList("META-INF", xs @ _*) => MergeStrategy.discard
-  case x => MergeStrategy.first
+  case PathList("META-INF", xs@_*) => MergeStrategy.discard
+  // for the Akka
+  case "reference.conf" => MergeStrategy.concat
+  case x =>
+    val oldStrategy = (assemblyMergeStrategy in assembly).value
+    oldStrategy(x)
 }
